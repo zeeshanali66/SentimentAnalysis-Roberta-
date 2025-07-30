@@ -1,65 +1,41 @@
-from datasets import load_dataset
-from transformers import (
-    XLMRobertaTokenizer,
-    XLMRobertaForSequenceClassification,
-    Trainer,
-    TrainingArguments
-)
-import numpy as np
-import evaluate
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from gradio_client import Client
+import os
 
-# ✅ Step 1: Load dataset
-dataset = load_dataset("SetFit/amazon_reviews_multi_en")
+app = Flask(__name__)
+CORS(app)  # Enable CORS
 
+# Load Gradio Space Client
+client = Client("zeeshanali66/MultiLingualSetiment")
 
-# ✅ Step 2: Tokenizer
-model_name = "xlm-roberta-base"
-tokenizer = XLMRobertaTokenizer.from_pretrained(model_name)
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "online",
+        "message": "Send POST to /predict with JSON: {\"text\": \"your sentence here\"}"
+    })
 
-def tokenize(batch):
-    return tokenizer(batch["text"], truncation=True, padding="max_length", max_length=128)
+@app.route("/predict", methods=["POST"])
+def predict():
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
 
-tokenized = dataset.map(tokenize, batched=True)
+    data = request.get_json()
+    user_input = data.get("text")
 
-# ✅ Step 3: Load model
-model = XLMRobertaForSequenceClassification.from_pretrained(model_name, num_labels=5)
+    if not user_input:
+        return jsonify({"error": "Missing 'text' field in JSON"}), 400
 
-# ✅ Step 4: Metric
-accuracy = evaluate.load("accuracy")
-def compute_metrics(eval_pred):
-    logits, labels = eval_pred
-    preds = np.argmax(logits, axis=-1)
-    return accuracy.compute(predictions=preds, references=labels)
+    try:
+        result = client.predict(
+            text=user_input,
+            api_name="/predict"
+        )
+        return jsonify({"sentiment": result}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-# ✅ Step 5: Training Arguments — load_best_model_at_end removed
-training_args = TrainingArguments(
-    output_dir="./results",
-    save_strategy="epoch",  # ✅ saves model at end of each epoch
-    learning_rate=2e-5,
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
-    num_train_epochs=3,
-    weight_decay=0.01,
-    logging_dir="./logs"
-)
-
-# ✅ Step 6: Trainer
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=tokenized["train"].shuffle(seed=42).select(range(2000)),
-    eval_dataset=tokenized["validation"].select(range(500)),
-    tokenizer=tokenizer,
-    compute_metrics=compute_metrics
-)
-
-# ✅ Step 7: Train
-trainer.train()
-
-# ✅ Step 8: Evaluate manually on test set
-results = trainer.evaluate(tokenized["test"].select(range(500)))
-print("Test Accuracy:", results["eval_accuracy"])
-
-# ✅ Step 9: Save model
-model.save_pretrained("./my_sentiment_model")
-tokenizer.save_pretrained("./my_sentiment_model")
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
