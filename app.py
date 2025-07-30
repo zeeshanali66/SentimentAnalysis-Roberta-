@@ -32,7 +32,12 @@ def predict():
             text=user_input,
             api_name="/predict"
         )
-        return jsonify({"sentiment": result}), 200
+        
+        # If result is like: "Sentiment: Very Positive (93.42% confidence)"
+        # We'll extract just the label
+        sentiment = result.split(":")[-1].split("(")[0].strip()
+        return jsonify({"sentiment": sentiment}), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
